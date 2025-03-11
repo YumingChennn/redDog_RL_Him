@@ -299,6 +299,7 @@ class MotorController(Node):
                 print(f"gravity_b: {gravity_b}")
                 print(f"qpos: {qpos}")
                 print(f"qvel: {qvel}")
+                
 
                 obs_list = []
                 obs_list.append(cmd_vel * cmd_scale)
