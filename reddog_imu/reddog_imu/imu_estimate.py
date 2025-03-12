@@ -169,11 +169,11 @@ class IMUDriverNode(Node):
         # 发布IMU消息
         self.imu_pub.publish(self.imu_msg)
 
-        self.get_logger().info("Published angles: Roll={:.0f}, angulx={:.0f} \nPitch={:.0f}, angulary={:.0f} \nYaw={:.0f}, angularz={:.0f}".format(
-            angle_degree[0], angularVelocity[0], 
-            angle_degree[1], angularVelocity[1], 
-            angle_degree[2], angularVelocity[2]
-        ))
+        # self.get_logger().info("Published angles: Roll={:.0f}, angulx={:.0f} \nPitch={:.0f}, angulary={:.0f} \nYaw={:.0f}, angularz={:.0f}".format(
+        #     angle_degree[0], angularVelocity[0], 
+        #     angle_degree[1], angularVelocity[1], 
+        #     angle_degree[2], angularVelocity[2]
+        # ))
 
         # self.get_logger().info("Published angular velocity  X {}, Y {}, Z {}".format(str(angularVelocity[0]),str(angularVelocity[1]),str(angularVelocity[1])))
     
