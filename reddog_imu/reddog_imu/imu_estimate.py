@@ -7,7 +7,7 @@ import threading
 import rclpy
 from rclpy.node import Node
 from transformations import quaternion_from_euler
-from std_msgs.msg import String
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Imu
 from tf_transformations import quaternion_matrix
 
@@ -74,46 +74,37 @@ def handle_serial_data(raw_data):
         key = 0
         return angle_flag
 
-# class KalmanFilter:
-#     def __init__(self, Q=0.01, R=0.1):
-#         self.x_k = 0.0  # 估計值
-#         self.P_k = 1.0  # 不確定性
-#         self.Q = Q      # 預測誤差
-#         self.R = R      # 測量誤差
-
-#     def update(self, measurement):
-#         # 預測步驟
-#         self.P_k += self.Q  # 更新不確定性
-
-#         # 更新步驟（卡爾曼增益）
-#         K = self.P_k / (self.P_k + self.R)  
-#         self.x_k += K * (measurement - self.x_k)  # 更新估計值
-#         self.P_k *= (1 - K)  # 更新不確定性
-
-#         return self.x_k  # 回傳平滑後的值
-        
+   
 class IMUDriverNode(Node):
     def __init__(self, port_name):
         super().__init__('angle_publisher_node')
 
-        # self.kf_x = KalmanFilter()
-        # self.kf_y = KalmanFilter()
-        # self.kf_z = KalmanFilter()
+        # Bias 初始值
+        self.bias_x = 0.22  
+        self.bias_y = 0.13  
+        self.bias_z = 0.1   
 
-        # 初始化IMU消息
+        # 低通濾波器參數（滑動窗口大小）
+        self.N = 10  
+        self.acc_buffer = []
+
+        # 速度估算
+        self.velocity = np.array([0.0, 0.0, 0.0])  # 初始速度
+        self.prev_time = time.time()  # 上一次更新的時間
+
+        # 初始化 IMU 訊息
         self.imu_msg = Imu()
         self.imu_msg.header.frame_id = 'imu_link'
 
-        # 创建IMU数据发布器
+        # 創建 IMU 數據發布器
         self.imu_pub = self.create_publisher(Imu, '/low_level_info/imu/data_raw', 1)
+        self.vel_pub = self.create_publisher(Twist, '/low_level_info/imu/velocity', 1) 
 
-        # 启动IMU驱动线程
+        # 啟動 IMU 驅動線程
         self.driver_thread = threading.Thread(target=self.driver_loop, args=(port_name,))
         self.driver_thread.start()
 
     def driver_loop(self, port_name):
-        # 打开串口
-
         try:
             wt_imu = serial.Serial(port="/dev/ttyUSB0", baudrate=115200, timeout=0.5)
             if wt_imu.isOpen():
@@ -126,10 +117,7 @@ class IMUDriverNode(Node):
             self.get_logger().info("\033[31mSerial port opening failure\033[0m")
             exit(0)
 
-        # 循环读取IMU数据
         while True:
-            # 读取加速度计数据
-
             try:
                 buff_count = wt_imu.inWaiting()
             except Exception as e:
@@ -145,38 +133,73 @@ class IMUDriverNode(Node):
                             self.imu_data()
 
     def imu_data(self):
-        # 更新IMU消息
-        self.imu_msg.header.stamp = self.get_clock().now().to_msg()
-        
-        self.imu_msg.linear_acceleration.x = float(acceleration[0])
-        self.imu_msg.linear_acceleration.y = float(acceleration[1])
-        self.imu_msg.linear_acceleration.z = float(acceleration[2])
+        global acceleration
 
-        # 濾波後的角速度
+        # **1. 讀取 IMU 加速度數據**
+        acc_x = float(acceleration[0])
+        acc_y = float(acceleration[1])
+        acc_z = float(acceleration[2])
+
+        # **2. 添加數據進入滑動窗口**
+        self.acc_buffer.append([acc_x, acc_y, acc_z])
+        if len(self.acc_buffer) > self.N:
+            self.acc_buffer.pop(0)  # 保持窗口大小為 N
+
+        # **3. 計算均值 Bias**
+        if len(self.acc_buffer) == self.N:
+            mean_acc = np.mean(self.acc_buffer, axis=0)  # 計算 N 筆數據的平均值
+            self.bias_x, self.bias_y, self.bias_z = mean_acc
+
+        # **4. 補償加速度**
+        acc_x -= self.bias_x
+        acc_y -= self.bias_y
+        acc_z -= self.bias_z  # 重力補償
+
+        # **5. 計算線性速度**
+        current_time = time.time()
+        dt = current_time - self.prev_time
+        self.prev_time = current_time
+
+        if dt > 0.001:  # 避免除以 0
+            acc_vector = np.array([acc_x, acc_y, acc_z])  # 加速度向量
+            self.velocity += acc_vector * dt  # v = v0 + at
+
+        # **6. 發布線性速度**
+        velocity_msg = Twist()
+        velocity_msg.linear.x = self.velocity[0]
+        velocity_msg.linear.y = self.velocity[1]
+        velocity_msg.linear.z = self.velocity[2]
+
+        # **7. 更新 IMU 訊息**
+        self.imu_msg.header.stamp = self.get_clock().now().to_msg()
+        self.imu_msg.linear_acceleration.x = acc_x
+        self.imu_msg.linear_acceleration.y = acc_y
+        self.imu_msg.linear_acceleration.z = acc_z
+
+        # **8. 濾波後的角速度**
         self.imu_msg.angular_velocity.x = float(angularVelocity[0])
-        self.imu_msg.angular_velocity.y = - float(angularVelocity[1])
-        self.imu_msg.angular_velocity.z = - float(angularVelocity[2])
+        self.imu_msg.angular_velocity.y = -float(angularVelocity[1])
+        self.imu_msg.angular_velocity.z = -float(angularVelocity[2])
 
         angle_radian = [angle_degree[i] * math.pi / 180 for i in range(3)]
-
         qua = quaternion_from_euler(angle_radian[0], angle_radian[1], angle_radian[2])
 
         self.imu_msg.orientation.x = qua[0]
         self.imu_msg.orientation.y = qua[1]
         self.imu_msg.orientation.z = qua[2]
         self.imu_msg.orientation.w = qua[3]
-        
-        # 发布IMU消息
+
+        # **9. 發布 IMU 訊息**
         self.imu_pub.publish(self.imu_msg)
+        self.vel_pub.publish(velocity_msg)
 
-        # self.get_logger().info("Published angles: Roll={:.0f}, angulx={:.0f} \nPitch={:.0f}, angulary={:.0f} \nYaw={:.0f}, angularz={:.0f}".format(
-        #     angle_degree[0], angularVelocity[0], 
-        #     angle_degree[1], angularVelocity[1], 
-        #     angle_degree[2], angularVelocity[2]
-        # ))
-
-        # self.get_logger().info("Published angular velocity  X {}, Y {}, Z {}".format(str(angularVelocity[0]),str(angularVelocity[1]),str(angularVelocity[1])))
-    
+        # **10. 記錄輸出**
+        self.get_logger().info(
+            f"Filtered Acceleration: X={acc_x:.3f}, Y={acc_y:.3f}, Z={acc_z:.3f}"
+        )
+        # self.get_logger().info(
+        #     f"Estimated Velocity: X={self.velocity[0]:.3f}, Y={self.velocity[1]:.3f}, Z={self.velocity[2]:.3f}"
+        # )
 
 def main():
     # 初始化ROS 2节点
