@@ -163,6 +163,9 @@ class IMUDriverNode(Node):
         if dt > 0.001:  # 避免除以 0
             acc_vector = np.array([acc_x, acc_y, acc_z])  # 加速度向量
             self.velocity += acc_vector * dt  # v = v0 + at
+        
+        if np.linalg.norm(acc_vector) < 0.005:  # 加速度接近 0，代表靜止
+            self.velocity = np.array([0.0, 0.0, 0.0])
 
         # **6. 發布線性速度**
         velocity_msg = Twist()
@@ -197,9 +200,9 @@ class IMUDriverNode(Node):
         self.get_logger().info(
             f"Filtered Acceleration: X={acc_x:.3f}, Y={acc_y:.3f}, Z={acc_z:.3f}"
         )
-        # self.get_logger().info(
-        #     f"Estimated Velocity: X={self.velocity[0]:.3f}, Y={self.velocity[1]:.3f}, Z={self.velocity[2]:.3f}"
-        # )
+        self.get_logger().info(
+            f"Estimated Velocity: X={self.velocity[0]:.3f}, Y={self.velocity[1]:.3f}, Z={self.velocity[2]:.3f}"
+        )
 
 def main():
     # 初始化ROS 2节点

@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Imu
 from std_msgs.msg import String, Float32MultiArray
+from geometry_msgs.msg import Twist
 import numpy as np
 import time
 import torch
@@ -37,11 +38,11 @@ class JointStateSubscriber(Node):
             self.jointVelocity_data[name] = velocities[i]
 
     def get_jointAngle_data(self):
-        self.dof_pos = [  self.jointAngle_data['flh'],  - self.jointAngle_data['frh'],    self.jointAngle_data['rlh'],  - self.jointAngle_data['rrh'], 
+        self.dof_pos = [  self.jointAngle_data['flh'],   self.jointAngle_data['frh'],   - self.jointAngle_data['rlh'],  - self.jointAngle_data['rrh'], 
                           self.jointAngle_data['flu'],  - self.jointAngle_data['fru'],    self.jointAngle_data['rlh'],  - self.jointAngle_data['rru'],  
                           self.jointAngle_data['fld'],  - self.jointAngle_data['frd'],    self.jointAngle_data['rld'],  - self.jointAngle_data['rrd']]
         
-        self.dof_vel = [  self.jointVelocity_data['flh'],  - self.jointVelocity_data['frh'],    self.jointVelocity_data['rlh'],  - self.jointVelocity_data['rrh'], 
+        self.dof_vel = [  self.jointVelocity_data['flh'],   self.jointVelocity_data['frh'],  - self.jointVelocity_data['rlh'],  - self.jointVelocity_data['rrh'], 
                           self.jointVelocity_data['flu'],  - self.jointVelocity_data['fru'],    self.jointVelocity_data['rlh'],  - self.jointVelocity_data['rru'],  
                           self.jointVelocity_data['fld'],  - self.jointVelocity_data['frd'],    self.jointVelocity_data['rld'],  - self.jointVelocity_data['rrd']]
     
@@ -68,6 +69,24 @@ class ImuSubscriber(Node):
     
     def get_Imu_data(self):
         return self.orientation, self.angular_velocity
+    
+class VelocitySubscriber(Node):
+    def __init__(self):
+        super().__init__('velocity_subscriber')
+        self.subscription = self.create_subscription(
+            Twist, 
+            '/low_level_info/imu/velocity', 
+            self.velocity_callback, 
+            10  # queue_size
+        )
+        self.subscription  # 防止垃圾回收
+        self.linear_velocity = None 
+
+    def velocity_callback(self, msg):
+        self.linear_velocity = msg.linear
+    
+    def get_velocity_data(self):
+        return self.linear_velocity
 
 class MotorController(Node):
     def __init__(self):
@@ -79,6 +98,7 @@ class MotorController(Node):
 
         self.imu_sub = ImuSubscriber()
         self.joint_state_sub = JointStateSubscriber()
+        self.imu_linvel_sub = VelocitySubscriber()
 
         self.initial_joint_angles = np.array([
             [ 0.0,   0.0,  0.0,   0.0 ],
@@ -109,10 +129,12 @@ class MotorController(Node):
         self.dof_vel = []
         self.orientation = None
         self.angular_velocity = None  # Add this
+        self.linear_velocity = None 
         
         executor = rclpy.executors.SingleThreadedExecutor()
         executor.add_node(self.joint_state_sub)
         executor.add_node(self.imu_sub)
+        executor.add_node(self.imu_linvel_sub)
         spin_thread = threading.Thread(target= executor.spin, daemon=True)
         spin_thread.start()
         print("thread start")
@@ -269,10 +291,12 @@ class MotorController(Node):
 
                 self.orientation, self.angular_velocity = self.imu_sub.get_Imu_data()
                 self.dof_pos, self.dof_vel = self.joint_state_sub.get_jointAngle_data()
+                self.linear_velocity = self.imu_linvel_sub.get_velocity_data() 
 
                 qpos = np.array(self.dof_pos, dtype=np.float32)
                 qvel = np.array(self.dof_vel, dtype=np.float32)
-                lin_vel_I = np.array([ 0.3, 0, 0], dtype=np.float32)
+                # lin_vel_I = np.array([ 0, 0, 0], dtype=np.float32)
+                lin_vel_I = np.array([self.linear_velocity.x, self.linear_velocity.y, self.linear_velocity.z], dtype=np.float32)
                 ang_vel_I = np.array([self.angular_velocity.x, self.angular_velocity.y, self.angular_velocity.z], dtype=np.float32)
                 # ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
                 # gravity_b = np.array([0, 0, -1], dtype=np.float32)
@@ -284,17 +308,17 @@ class MotorController(Node):
                 # 記錄數據
                 time_steps_list.append(time_step)
                 lin_vel_data_list.append(lin_vel_I * lin_vel_scale)
-                ang_vel_data_list.append(ang_vel_I * ang_vel_scale * 0.5)
+                ang_vel_data_list.append(ang_vel_I * ang_vel_scale)
                 gravity_b_list.append(gravity_b )
                 joint_vel_list.append(qvel * dof_vel_scale)
                 action_list.append(action)
 
                 obs[:3] = lin_vel_I * lin_vel_scale
-                obs[3:6] = ang_vel_I * ang_vel_scale * 0.5
+                obs[3:6] = ang_vel_I * ang_vel_scale
                 obs[6:9] = gravity_b
                 obs[9:12] = cmd_vel * cmd_scale
                 obs[12:24] = (qpos - default_angles) * dof_pos_scale
-                obs[24:36] = qvel * dof_vel_scale
+                obs[24:36] = qvel * dof_vel_scale 
                 obs[36:48] = action
 
                 obs_tensor = torch.from_numpy(obs).unsqueeze(0)
@@ -303,7 +327,7 @@ class MotorController(Node):
                 # print("action :", action)
 
                 current_angles = action * action_scale + default_angles
-                current_angles = default_angles.copy()
+                # current_angles = default_angles.copy()
                 self.current_angles = self.convert_joint_angles(current_angles)
                 self.send_cmd()
 

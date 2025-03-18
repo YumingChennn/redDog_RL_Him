@@ -3,6 +3,10 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Imu
 from std_msgs.msg import String, Float32MultiArray
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import QuaternionStamped
+from geometry_msgs.msg import Vector3Stamped
+from scipy.signal import butter, filtfilt
 import numpy as np
 import time
 import torch
@@ -10,6 +14,35 @@ import yaml
 import matplotlib.pyplot as plt
 import argparse
 import threading
+
+class CmdVelSubscriber(Node):
+    def __init__(self):
+        super().__init__('cmd_vel_subscriber')
+        self.subscription = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.listener_callback,
+            10
+        )
+
+        self.linear_x = 0.0
+        self.linear_y = 0.0
+        self.linear_z = 0.0
+
+        self.angular_x = 0.0
+        self.angular_y = 0.0
+        self.angular_z = 0.0
+
+        self.get_logger().info('Vel Subscriber has been started')
+
+    def listener_callback(self, msg):
+        self.linear_x = msg.linear.x
+        self.linear_y = msg.linear.y
+        self.linear_z = msg.linear.z
+
+        self.angular_x = msg.angular.x
+        self.angular_y = msg.angular.y
+        self.angular_z = msg.angular.z
 
 class JointStateSubscriber(Node):
     def __init__(self):
@@ -49,27 +82,42 @@ class JointStateSubscriber(Node):
     
         return self.dof_pos, self.dof_vel
     
-class ImuSubscriber(Node):
+class AngularVSubscriber(Node):
     def __init__(self):
-        super().__init__('low_level_Imu_subscriber')
+        super().__init__('Imu_angular_velocity_subscriber')
         self.subscription = self.create_subscription(
-            Imu,
-            '/low_level_info/imu/data_raw',
+            Vector3Stamped,
+            '/imu/angular_velocity_hr',
             self.joint_state_callback,
             10
         )
-        self.get_logger().info('Subscribed to Imu topic.')
-        self.orientation = None
-        self.angular_velocity = None 
+        self.get_logger().info('Subscribed to angular velocity topic.')
+        self.angular_velocity = None
 
     def joint_state_callback(self, msg):
-        # print("orientation", self.orientation)
-        # print("velocity", self.angular_velocity)
-        self.orientation = msg.orientation
-        self.angular_velocity = msg.angular_velocity
-    
+        self.angular_velocity = msg.vector
+        self.get_logger().info(f"Received angular velocity: x={msg.vector.x}, y={msg.vector.y}, z={msg.vector.z}")
+
     def get_Imu_data(self):
-        return self.orientation, self.angular_velocity
+        return self.angular_velocity
+
+class QuaternionSubscriber(Node):
+    def __init__(self):
+        super().__init__('Imu_quaternion_subscriber')
+        self.subscription = self.create_subscription(
+            QuaternionStamped,
+            '/filter/quaternion',
+            self.joint_state_callback,
+            10
+        )
+        self.get_logger().info('Subscribed to quaternion topic.')
+        self.quaternion = None
+
+    def joint_state_callback(self, msg):
+        self.quaternion = msg.quaternion
+
+    def get_Imu_data(self):
+        return self.quaternion
 
 class MotorController(Node):
     def __init__(self):
@@ -79,8 +127,10 @@ class MotorController(Node):
         self.timer_joint = self.create_timer(0.02, self.publish_joint_states)
         self.timer_pidgain = self.create_timer(0.02, self.publish_kp_kq)
 
-        self.imu_sub = ImuSubscriber()
+        self.anguv_sub = AngularVSubscriber()
+        self.qua_sub = QuaternionSubscriber()
         self.joint_state_sub = JointStateSubscriber()
+        self.cmd_vel = CmdVelSubscriber()
 
         self.initial_joint_angles = np.array([
             [ 0.0,   0.0,  0.0,   0.0 ],
@@ -109,15 +159,22 @@ class MotorController(Node):
 
         self.dof_pos = []
         self.dof_vel = []
-        self.orientation = None
-        self.angular_velocity = None  # Add this
+
+        self.horizontal_velocity = np.array([0.0, 0.0])
+        self.yaw_rate = 0
         
         executor = rclpy.executors.SingleThreadedExecutor()
         executor.add_node(self.joint_state_sub)
-        executor.add_node(self.imu_sub)
+        executor.add_node(self.anguv_sub)
+        executor.add_node(self.qua_sub)
+        executor.add_node(self.cmd_vel)
         spin_thread = threading.Thread(target= executor.spin, daemon=True)
         spin_thread.start()
         print("thread start")
+
+    def get_vel_data(self):
+        self.horizontal_velocity = np.array([self.cmd_vel.linear_x, self.cmd_vel.linear_y]) * 8
+        self.yaw_rate = self.cmd_vel.angular_z * 1.8
     
     def convert_joint_angles(self, dof_pos):
         mapping = ['flh', 'frh', 'rlh', 'rrh',  # Hips
@@ -166,7 +223,7 @@ class MotorController(Node):
         self.current_angles = self.default_joint_angles.copy()    
         start_time = time.time()  
 
-        while time.time() - start_time < 10: 
+        while time.time() - start_time < 10:
             self.send_cmd()
             time.sleep(0.02)  # 50 Hz
 
@@ -267,19 +324,22 @@ class MotorController(Node):
         try:
             while True:
                 start_time = time.time()
-
-                self.orientation, self.angular_velocity = self.imu_sub.get_Imu_data()
+                
+                angular_velocity = self.anguv_sub.get_Imu_data()
+                orientation= self.qua_sub.get_Imu_data()
                 self.dof_pos, self.dof_vel = self.joint_state_sub.get_jointAngle_data()
+                self.get_vel_data()
 
                 qpos = np.array(self.dof_pos, dtype=np.float32)
                 qvel = np.array(self.dof_vel, dtype=np.float32)
-                ang_vel_I = np.array([self.angular_velocity.x, self.angular_velocity.y, self.angular_velocity.z], dtype=np.float32)
-                # ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
+                ang_vel_I = np.array([angular_velocity.x, - angular_velocity.y,  -angular_velocity.z], dtype=np.float32)
+                ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
                 # gravity_b = np.array([0, 0, -1], dtype=np.float32)
-                gravity_b = self.get_gravity_orientation(np.array([self.orientation.w, self.orientation.x, self.orientation.y, self.orientation.z], dtype=np.float32))
-                cmd_vel = np.array(config["cmd_init"], dtype=np.float32)
+                gravity_b = self.get_gravity_orientation(np.array([orientation.w, orientation.x, orientation.y, orientation.z], dtype=np.float32))
+                # cmd_vel = np.array(config["cmd_init"], dtype=np.float32)
+                cmd_vel = np.array([self.horizontal_velocity[0], self.horizontal_velocity[1], self.yaw_rate], dtype=np.float32)
 
-                print(f"ang_vel_I: {ang_vel_I}")
+                print(f"ang_vel_I: {cmd_vel}")
 
                 # 記錄數據
                 time_steps_list.append(time_step)

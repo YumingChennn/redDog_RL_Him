@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Imu
 from std_msgs.msg import String, Float32MultiArray
+from geometry_msgs.msg import Twist
 import numpy as np
 import time
 import torch
@@ -70,6 +71,24 @@ class ImuSubscriber(Node):
     
     def get_Imu_data(self):
         return self.orientation, self.angular_velocity
+    
+class VelocitySubscriber(Node):
+    def __init__(self):
+        super().__init__('velocity_subscriber')
+        self.subscription = self.create_subscription(
+            Twist, 
+            '/low_level_info/imu/velocity', 
+            self.velocity_callback, 
+            10  # queue_size
+        )
+        self.subscription  # 防止垃圾回收
+        self.linear_velocity = None 
+
+    def velocity_callback(self, msg):
+        self.linear_velocity = msg.linear
+    
+    def get_velocity_data(self):
+        return self.linear_velocity
 
 class MotorController(Node):
     def __init__(self):
@@ -81,6 +100,7 @@ class MotorController(Node):
 
         self.imu_sub = ImuSubscriber()
         self.joint_state_sub = JointStateSubscriber()
+        self.imu_linvel_sub = VelocitySubscriber()
 
         self.initial_joint_angles = np.array([
             [ 0.0,   0.0,  0.0,   0.0 ],
@@ -111,10 +131,12 @@ class MotorController(Node):
         self.dof_vel = []
         self.orientation = None
         self.angular_velocity = None  # Add this
+        self.linear_velocity = None 
         
         executor = rclpy.executors.SingleThreadedExecutor()
         executor.add_node(self.joint_state_sub)
         executor.add_node(self.imu_sub)
+        executor.add_node(self.imu_linvel_sub)
         spin_thread = threading.Thread(target= executor.spin, daemon=True)
         spin_thread.start()
         print("thread start")
@@ -231,6 +253,7 @@ class MotorController(Node):
             return
 
         default_angles = np.array(config["default_angles"], dtype=np.float32)
+        lin_vel_scale = config["lin_vel_scale"]
         ang_vel_scale = config["ang_vel_scale"]
         dof_pos_scale = config["dof_pos_scale"]
         dof_vel_scale = config["dof_vel_scale"]
@@ -239,8 +262,8 @@ class MotorController(Node):
 
         num_actions = config["num_actions"]
         num_obs = config["num_obs"]
-        one_step_obs_size = config["one_step_obs_size"]
-        obs_buffer_size = config["obs_buffer_size"]
+        # one_step_obs_size = config["one_step_obs_size"]
+        # obs_buffer_size = config["obs_buffer_size"]
 
         cmd = np.array(config["cmd_init"], dtype=np.float32)
 
@@ -250,6 +273,7 @@ class MotorController(Node):
 
         time_step = 0  
         time_steps_list = []
+        lin_vel_data_list = []
         ang_vel_data_list = []
         gravity_b_list = []
         joint_vel_list = []
@@ -257,8 +281,8 @@ class MotorController(Node):
 
         interval = 1.0 / 50  # 150 Hz -> 每次執行間隔 6.67 ms
         
-        self.kp = 10
-        self.kq = 0.4
+        self.kp = 5
+        self.kq = 0.1
 
         # kps = np.array(config["kps"], dtype=np.float32)
         # kds = np.array(config["kds"], dtype=np.float32)
@@ -270,9 +294,12 @@ class MotorController(Node):
 
                 self.orientation, self.angular_velocity = self.imu_sub.get_Imu_data()
                 self.dof_pos, self.dof_vel = self.joint_state_sub.get_jointAngle_data()
+                self.linear_velocity = self.imu_linvel_sub.get_velocity_data() 
 
                 qpos = np.array(self.dof_pos, dtype=np.float32)
                 qvel = np.array(self.dof_vel, dtype=np.float32)
+                # lin_vel_I = np.array([ 0, 0, 0], dtype=np.float32)
+                lin_vel_I = np.array([self.linear_velocity.x, self.linear_velocity.y, self.linear_velocity.z], dtype=np.float32)
                 ang_vel_I = np.array([self.angular_velocity.x, self.angular_velocity.y, self.angular_velocity.z], dtype=np.float32)
                 # ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
                 # gravity_b = np.array([0, 0, -1], dtype=np.float32)
@@ -283,31 +310,25 @@ class MotorController(Node):
 
                 # 記錄數據
                 time_steps_list.append(time_step)
-                ang_vel_data_list.append(ang_vel_I * ang_vel_scale )
+                lin_vel_data_list.append(lin_vel_I * lin_vel_scale)
+                ang_vel_data_list.append(ang_vel_I * ang_vel_scale *0.5)
                 gravity_b_list.append(gravity_b )
                 joint_vel_list.append(qvel * dof_vel_scale)
                 action_list.append(action)
 
-                obs_list = [
-                    cmd_vel * cmd_scale,
-                    ang_vel_I * ang_vel_scale ,
-                    gravity_b,
-                    (qpos - default_angles) * dof_pos_scale,
-                    qvel * dof_vel_scale,
-                    action
-                ]
+                obs[:3] = lin_vel_I * lin_vel_scale
+                obs[3:6] = ang_vel_I * ang_vel_scale *0.5
+                obs[6:9] = gravity_b
+                obs[9:12] = cmd_vel * cmd_scale
+                obs[12:24] = (qpos - default_angles) * dof_pos_scale
+                obs[24:36] = qvel * dof_vel_scale 
+                obs[36:48] = action
 
-                obs_list = [torch.tensor(obs, dtype=torch.float32) if isinstance(obs, np.ndarray) else obs for obs in obs_list]
-                obs_tensor_buf = torch.zeros((1, one_step_obs_size * obs_buffer_size))
-                obs = torch.cat(obs_list, dim=0).unsqueeze(0)
-                obs_tensor = torch.clamp(obs, -100, 100)
+                obs_tensor = torch.from_numpy(obs).unsqueeze(0)
+                # policy inference
+                action = policy(obs_tensor).detach().numpy().squeeze()
+                # print("action :", action)
 
-                obs_tensor_buf = torch.cat([
-                    obs_tensor,
-                    obs_tensor_buf[:, :obs_buffer_size * one_step_obs_size - one_step_obs_size]
-                ], dim=1)
-
-                action = policy(obs_tensor_buf).detach().numpy().squeeze()
                 current_angles = action * action_scale + default_angles
                 # current_angles = default_angles.copy()
                 self.current_angles = self.convert_joint_angles(current_angles)
@@ -326,27 +347,35 @@ class MotorController(Node):
             plt.figure(figsize=(14, 16))
 
             plt.subplot(3, 2, 1)
+            for i in range(3):
+                plt.plot(time_steps_list, [step[i] for step in lin_vel_data_list], label=f"Linear Velocity {i}")
+            plt.title("History Linear Velocity", fontsize=10, pad=10)
+            plt.xlabel("Time Step")
+            plt.legend()
+            plt.tight_layout()
+
+            plt.subplot(3, 2, 2)
             for i in range(3): 
                 plt.plot(time_steps_list, [step[i] for step in ang_vel_data_list], label=f"Angular Velocity {i}")
             plt.title("History Angular Velocity", fontsize=10, pad=10)
             plt.xlabel("Time Step")
             plt.legend()
 
-            plt.subplot(3, 2, 2)
+            plt.subplot(3, 2, 3)
             for i in range(3):
                 plt.plot(time_steps_list, [step[i] for step in gravity_b_list], label=f"Project Gravity {i}")
             plt.title("History Project Gravity", fontsize=10, pad=10)
             plt.xlabel("Time Step")
             plt.legend()
 
-            plt.subplot(3, 2, 3)
+            plt.subplot(3, 2, 4)
             for i in range(2):
                 plt.plot(time_steps_list, [step[i] for step in joint_vel_list], label=f"Joint Velocity {i}")
             plt.title("History Joint Velocity", fontsize=10, pad=10)
             plt.xlabel("Time Step")
             plt.legend()
 
-            plt.subplot(3, 2, 4)
+            plt.subplot(3, 2, 5)
             for i in range(2):
                 plt.plot(time_steps_list, [step[i] for step in action_list], label=f"Velocity Command {i}")
             plt.title("History Torque Command", fontsize=10, pad=10)

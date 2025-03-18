@@ -214,7 +214,7 @@ class DualControlCmd:
         self.serial_device_1 = serial.Serial('/dev/ttyACM0', 921600, timeout=0.5)
         self.motor_control_1 = MotorControl(self.serial_device_1)
         
-        self.serial_device_2 = serial.Serial('/dev/ttyACM1', 921600, timeout=0.5)
+        self.serial_device_2 = serial.Serial('/dev/ttyACM2', 921600, timeout=0.5)
         self.motor_control_2 = MotorControl(self.serial_device_2)
 
     def setup_motors(self):

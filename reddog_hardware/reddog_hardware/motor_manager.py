@@ -6,7 +6,7 @@ import math
 import random
 import traceback
 import threading
-from reddog_hardware.DM_CAN import *
+from DM_CAN import *
 
 import rclpy
 from rclpy.node import Node
@@ -217,7 +217,7 @@ class DualControlCmd:
         self.motor_control_1 = MotorControl(self.serial_device_1)
         #/dev/ttyRedDogRight
         
-        self.serial_device_2 = serial.Serial('/dev/ttyACM1', 921600, timeout=0.5)
+        self.serial_device_2 = serial.Serial('/dev/ttyACM2', 921600, timeout=0.5)
         self.motor_control_2 = MotorControl(self.serial_device_2)
         #/dev/ttyRedDogLeft
 
