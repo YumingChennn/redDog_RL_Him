@@ -213,11 +213,11 @@ class DualControlCmd:
 
     # [Previous setup_serials, setup_motors, load_config methods remain the same]
     def setup_serials(self):
-        self.serial_device_1 = serial.Serial('/dev/ttyACM0', 921600, timeout=0.5)
+        self.serial_device_1 = serial.Serial('/dev/ttyACM1', 921600, timeout=0.5)
         self.motor_control_1 = MotorControl(self.serial_device_1)
         #/dev/ttyRedDogRight
         
-        self.serial_device_2 = serial.Serial('/dev/ttyACM2', 921600, timeout=0.5)
+        self.serial_device_2 = serial.Serial('/dev/ttyACM0', 921600, timeout=0.5)
         self.motor_control_2 = MotorControl(self.serial_device_2)
         #/dev/ttyRedDogLeft
 

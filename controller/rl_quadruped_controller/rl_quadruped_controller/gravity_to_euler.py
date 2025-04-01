@@ -22,6 +22,6 @@ def gravity_to_euler(gx, gy, gz):
     return roll, pitch, yaw
 
 # 測試重力向量
-gx, gy, gz = 0.0, 0.0, 1  # 示例值 (對應於 roll=10°, pitch=0°, yaw=0°)
+gx, gy, gz = 0.0, 0.0, -1  # 示例值 (對應於 roll=10°, pitch=0°, yaw=0°)
 roll, pitch, yaw = gravity_to_euler(gx, gy, gz)
 print(f"Euler Angles: Roll={roll:.2f}°, Pitch={pitch:.2f}°, Yaw={yaw:.2f}°")

@@ -307,13 +307,13 @@ class MotorController(Node):
 
                 # 記錄數據
                 time_steps_list.append(time_step)
-                lin_vel_data_list.append(lin_vel_I * lin_vel_scale)
+                lin_vel_data_list.append(lin_vel_I * lin_vel_scale * 0.5)
                 ang_vel_data_list.append(ang_vel_I * ang_vel_scale)
                 gravity_b_list.append(gravity_b )
                 joint_vel_list.append(qvel * dof_vel_scale)
                 action_list.append(action)
 
-                obs[:3] = lin_vel_I * lin_vel_scale
+                obs[:3] = lin_vel_I * lin_vel_scale * 0.5
                 obs[3:6] = ang_vel_I * ang_vel_scale
                 obs[6:9] = gravity_b
                 obs[9:12] = cmd_vel * cmd_scale

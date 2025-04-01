@@ -96,7 +96,7 @@ class AngularVSubscriber(Node):
 
     def joint_state_callback(self, msg):
         self.angular_velocity = msg.vector
-        self.get_logger().info(f"Received angular velocity: x={msg.vector.x}, y={msg.vector.y}, z={msg.vector.z}")
+        # self.get_logger().info(f"Received angular velocity: x={msg.vector.x}, y={msg.vector.y}, z={msg.vector.z}")
 
     def get_Imu_data(self):
         return self.angular_velocity
@@ -154,8 +154,6 @@ class MotorController(Node):
         self.target_angles = None
         self.start_time = None 
         self.transition_duration = 1.2
-        self.command_type = None  
-        self.last_command = None
 
         self.dof_pos = []
         self.dof_vel = []
@@ -173,8 +171,8 @@ class MotorController(Node):
         print("thread start")
 
     def get_vel_data(self):
-        self.horizontal_velocity = np.array([self.cmd_vel.linear_x, self.cmd_vel.linear_y]) * 8
-        self.yaw_rate = self.cmd_vel.angular_z * 1.8
+        self.horizontal_velocity = np.array([self.cmd_vel.linear_x, self.cmd_vel.linear_y]) * 4
+        self.yaw_rate = self.cmd_vel.angular_z * 1.5
     
     def convert_joint_angles(self, dof_pos):
         mapping = ['flh', 'frh', 'rlh', 'rrh',  # Hips
@@ -183,7 +181,7 @@ class MotorController(Node):
 
         format1_order = ['flh', 'flu', 'fld',  
                         'frh', 'fru', 'frd', 
-                        'rlh', 'rlu', 'rld',    
+                        'rlh', 'rlu', 'rld',
                         'rrh', 'rru', 'rrd']
         
         index_map = [format1_order.index(name) for name in mapping]
@@ -223,7 +221,7 @@ class MotorController(Node):
         self.current_angles = self.default_joint_angles.copy()    
         start_time = time.time()  
 
-        while time.time() - start_time < 10:
+        while time.time() - start_time < 20:
             self.send_cmd()
             time.sleep(0.02)  # 50 Hz
 
@@ -245,7 +243,6 @@ class MotorController(Node):
             if np.allclose(self.current_angles, self.target_angles, atol=0.01):
                 self.current_angles = self.target_angles
                 self.target_angles = None
-                self.command_type = None
                 self.get_logger().info("Movement completed, ready for next command.")
                 return  
             time.sleep(0.02)  # 50 Hz
@@ -269,8 +266,8 @@ class MotorController(Node):
         gravity_orientation = np.zeros(3)
 
         gravity_orientation[0] = 2 * (qx * qz - qw * qy)
-        gravity_orientation[1] = 2 * (qy * qz + qw * qx)
-        gravity_orientation[2] = 1 - 2 * (qx**2 + qy**2)
+        gravity_orientation[1] = -2 * (qy * qz + qw * qx)
+        gravity_orientation[2] = -1 - 2 * (qx**2 + qy**2)
 
         return gravity_orientation
 
@@ -314,7 +311,7 @@ class MotorController(Node):
 
         interval = 1.0 / 50  # 150 Hz -> 每次執行間隔 6.67 ms
         
-        self.kp = 10
+        self.kp = 13
         self.kq = 0.4
 
         # kps = np.array(config["kps"], dtype=np.float32)
@@ -332,25 +329,25 @@ class MotorController(Node):
 
                 qpos = np.array(self.dof_pos, dtype=np.float32)
                 qvel = np.array(self.dof_vel, dtype=np.float32)
-                ang_vel_I = np.array([angular_velocity.x, - angular_velocity.y,  -angular_velocity.z], dtype=np.float32)
-                ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
+                ang_vel_I = np.array([angular_velocity.x, angular_velocity.y, angular_velocity.z], dtype=np.float32)
+                # ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
                 # gravity_b = np.array([0, 0, -1], dtype=np.float32)
                 gravity_b = self.get_gravity_orientation(np.array([orientation.w, orientation.x, orientation.y, orientation.z], dtype=np.float32))
                 # cmd_vel = np.array(config["cmd_init"], dtype=np.float32)
                 cmd_vel = np.array([self.horizontal_velocity[0], self.horizontal_velocity[1], self.yaw_rate], dtype=np.float32)
 
-                print(f"ang_vel_I: {cmd_vel}")
+                print(f"cmd_vel: {cmd_vel}")
 
                 # 記錄數據
                 time_steps_list.append(time_step)
-                ang_vel_data_list.append(ang_vel_I * ang_vel_scale )
+                ang_vel_data_list.append(ang_vel_I * ang_vel_scale *0.3)
                 gravity_b_list.append(gravity_b )
-                joint_vel_list.append(qvel * dof_vel_scale)
+                joint_vel_list.append(qvel * dof_vel_scale )
                 action_list.append(action)
 
                 obs_list = [
                     cmd_vel * cmd_scale,
-                    ang_vel_I * ang_vel_scale ,
+                    ang_vel_I * ang_vel_scale*0.3,
                     gravity_b,
                     (qpos - default_angles) * dof_pos_scale,
                     qvel * dof_vel_scale,

@@ -31,17 +31,23 @@ def quaternion_to_gravity(qx, qy, qz, qw):
     :return: (gx, gy, gz)
     """
     gx = 2 * (qx * qz - qw * qy)
-    gy = 2 * (qy * qz + qw * qx)
-    gz = 1 - 2 * (qx**2 + qy**2)
+    gy = -2 * (qy * qz + qw * qx)
+    gz = -1 - 2 * (qx**2 + qy**2)
 
     return gx, gy, gz
 
-# 測試輸入
-roll, pitch, yaw = 170, 0, 0  # 測試角度 (度)
+# # 測試輸入
+# roll, pitch, yaw = 0, 0, 0  # 測試角度 (度)
 
-# 轉換為四元數
-qx, qy, qz, qw = euler_to_quaternion(roll, pitch, yaw)
-print(f"Quaternion: ({qx:.4f}, {qy:.4f}, {qz:.4f}, {qw:.4f})")
+# # 轉換為四元數
+# qx, qy, qz, qw = euler_to_quaternion(roll, pitch, yaw)
+# print(f"Quaternion: ({qx:.4f}, {qy:.4f}, {qz:.4f}, {qw:.4f})")
+
+qx = -0.019
+qy = -0.020
+qz = 0.327
+qw = 0.94455
+
 
 # 轉換為重力向量
 gx, gy, gz = quaternion_to_gravity(qx, qy, qz, qw)
