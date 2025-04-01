@@ -6,12 +6,14 @@ import math
 import random
 import traceback
 import threading
-from DM_CAN import *
+from reddog_hardware.DM_CAN import *
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float32MultiArray
+
+from ament_index_python.packages import get_package_share_directory
 
 class JointStateSubscriber(Node):
     def __init__(self):
@@ -213,11 +215,11 @@ class DualControlCmd:
 
     # [Previous setup_serials, setup_motors, load_config methods remain the same]
     def setup_serials(self):
-        self.serial_device_1 = serial.Serial('/dev/ttyACM1', 921600, timeout=0.5)
+        self.serial_device_1 = serial.Serial('/dev/ttyRedDogRight', 921600, timeout=0.5)
         self.motor_control_1 = MotorControl(self.serial_device_1)
         #/dev/ttyRedDogRight
         
-        self.serial_device_2 = serial.Serial('/dev/ttyACM0', 921600, timeout=0.5)
+        self.serial_device_2 = serial.Serial('/dev/ttyRedDogLeft', 921600, timeout=0.5)
         self.motor_control_2 = MotorControl(self.serial_device_2)
         #/dev/ttyRedDogLeft
 
@@ -345,8 +347,11 @@ class DualControlCmd:
 
 def main():
 
-    package_path = os.path.dirname(os.path.realpath(__file__))  # Get script directory
-    config_path = os.path.join(package_path, "config", "motor_config.yaml")
+    package_share_directory = get_package_share_directory('reddog_hardware')
+    config_path = os.path.join(package_share_directory, 'config', 'motor_config.yaml')
+
+    # package_path = os.path.dirname(os.path.realpath(__file__))  # Get script directory
+    # config_path = os.path.join(package_path, "config", "motor_config.yaml")
 
     rclpy.init()
     motor_manager = MotorManager(config_path)

@@ -13,7 +13,7 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1d6b", ATTRS{idProduct}=="0002", KERNEL=="tt
 SUBSYSTEM=="tty", ATTRS{idVendor}=="2e88", ATTRS{idProduct}=="4603", KERNEL=="ttyACM1", SYMLINK+="ttyRedDogRight", MODE="0666"
 
 # Imu
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", KERNEL=="ttyUSB0", SYMLINK+="ttyIMU", MODE="0666"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2639", ATTRS{idProduct}=="0301", KERNEL=="ttyUSB0", SYMLINK+="ttyIMU", MODE="0666"
 
 EOL
 

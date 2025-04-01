@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'rl_quadruped_controller = rl_quadruped_controller.controller:main',
+            'joy_controller = rl_quadruped_controller.joy_controller:main',
         ],
     },
 )

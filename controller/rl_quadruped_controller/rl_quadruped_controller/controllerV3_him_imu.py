@@ -331,8 +331,8 @@ class MotorController(Node):
                 qvel = np.array(self.dof_vel, dtype=np.float32)
                 ang_vel_I = np.array([angular_velocity.x, angular_velocity.y, angular_velocity.z], dtype=np.float32)
                 # ang_vel_I = np.array([  0,  0,  0], dtype=np.float32)
-                # gravity_b = np.array([0, 0, -1], dtype=np.float32)
                 gravity_b = self.get_gravity_orientation(np.array([orientation.w, orientation.x, orientation.y, orientation.z], dtype=np.float32))
+                # gravity_b = np.array([0, 0, -1], dtype=np.float32)
                 # cmd_vel = np.array(config["cmd_init"], dtype=np.float32)
                 cmd_vel = np.array([self.horizontal_velocity[0], self.horizontal_velocity[1], self.yaw_rate], dtype=np.float32)
 
